@@ -1,0 +1,7 @@
+cd C:\Users\sss\Documents\bot-afiliado
+git init
+git add .
+git commit -m "primeiro commit"
+git branch -M main
+git remote add origin https://github.com/mendonça-nata/bot-afiliado.git
+git push -u origin main
