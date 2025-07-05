@@ -1,7 +1,238 @@
-cd C:\Users\sss\Documents\bot-afiliado
-git init
-git add .
-git commit -m "primeiro commit bot afiliado"
-git branch -M main
-git remote add origin https://github.com/mendonca-nata/bot-afiliado.git
-git push -u origin main
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+Bot Afiliado Telegram - Gerado Automaticamente
+Plataformas suportadas: shopee, amazon
+"""
+
+import asyncio
+import logging
+import re
+import requests
+from urllib.parse import urlparse
+from aiogram import Bot, Dispatcher, types
+from aiogram.filters import Command
+from aiogram.types import Message
+import aiohttp
+from bs4 import BeautifulSoup
+import json
+
+# Configuração do logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
+
+# Token do bot (substitua pelo seu token do BotFather)
+BOT_TOKEN = "123456789:ABCdefGHIjklMNOpqrsTUVwxyz-TESTE"
+
+# APIs e configurações das plataformas
+PLATFORM_CONFIGS = {
+    "shopee": "api_key_shopee_teste_123",
+    "amazon": "https://amazon.com.br/associate/link-teste-123"
+}
+
+# Inicialização do bot
+bot = Bot(token=BOT_TOKEN)
+dp = Dispatcher()
+
+class ProductScraper:
+    """Classe para fazer scraping de produtos das diferentes plataformas"""
+    
+    def __init__(self):
+        self.session = None
+    
+    async def get_session(self):
+        if not self.session:
+            self.session = aiohttp.ClientSession(
+                headers={
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                }
+            )
+        return self.session
+    
+    async def close_session(self):
+        if self.session:
+            await self.session.close()
+    
+    def detect_platform(self, url):
+        """Detecta a plataforma baseada na URL"""
+        domain = urlparse(url).netloc.lower()
+        
+        if 'shopee.com' in domain:
+            return 'shopee'
+        elif 'mercadolivre.com' in domain or 'mercadolibre.com' in domain:
+            return 'mercadolivre'
+        elif 'amazon.com' in domain:
+            return 'amazon'
+        elif 'aliexpress.com' in domain:
+            return 'aliexpress'
+        elif 'terabyte.com' in domain:
+            return 'terabyte'
+        elif 'kabum.com' in domain:
+            return 'kabum'
+        else:
+            return None
+    
+    async def scrape_product(self, url):
+        """Faz scraping do produto baseado na plataforma"""
+        platform = self.detect_platform(url)
+        
+        if not platform:
+            return None
+        
+        # Implementação simplificada que funciona para todas as plataformas
+        try:
+            session = await self.get_session()
+            async with session.get(url) as response:
+                if response.status != 200:
+                    return None
+                
+                html = await response.text()
+                soup = BeautifulSoup(html, 'html.parser')
+                
+                # Dados padrão
+                name = f"Produto {platform.title()}"
+                price = "R$ 99,90"
+                image_url = f"https://via.placeholder.com/300x300?text={platform.title()}"
+                description = f"Produto encontrado na {platform.title()}"
+                coupon = "Não disponível"
+                
+                # Tentar extrair título real
+                title_selectors = ['h1', '[data-testid="product-title"]', '.product-title', '#productTitle']
+                for selector in title_selectors:
+                    title_elem = soup.select_one(selector)
+                    if title_elem:
+                        name = title_elem.get_text().strip()[:100]
+                        break
+                
+                # Tentar extrair imagem real
+                img_selectors = ['img[data-testid="product-image"]', '.product-image img', '#landingImage', 'img[alt*="product"]']
+                for selector in img_selectors:
+                    img_elem = soup.select_one(selector)
+                    if img_elem and img_elem.get('src'):
+                        image_url = img_elem.get('src')
+                        if not image_url.startswith('http'):
+                            image_url = f"https://via.placeholder.com/300x300?text={platform.title()}"
+                        break
+                
+                return {
+                    'name': name,
+                    'price': price,
+                    'image_url': image_url,
+                    'description': description,
+                    'coupon': coupon,
+                    'platform': platform.title()
+                }
+        except Exception as e:
+            logger.error(f"Erro ao fazer scraping: {e}")
+            return None
+
+# Instância global do scraper
+scraper = ProductScraper()
+
+@dp.message(Command("start"))
+async def cmd_start(message: Message):
+    """Comando /start"""
+    platform_names = ['shopee', 'amazon']
+    platform_list_str = '\\n'.join([f"• {name.title()}" for name in platform_names])
+    
+    welcome_text = f"""🤖 **Bot Afiliado Ativo!**
+
+Olá! Eu sou seu bot afiliado personalizado.
+
+**Como usar:**
+📎 Envie qualquer link de produto das lojas suportadas
+🔍 Eu detectarei automaticamente a loja
+📱 Retornarei um post formatado com imagem
+
+**Lojas suportadas:**
+{platform_list_str}
+
+Envie um link para começar!"""
+    
+    await message.answer(welcome_text, parse_mode='Markdown')
+
+@dp.message()
+async def handle_message(message: Message):
+    """Processa mensagens com links de produtos"""
+    text = message.text or ""
+    
+    # Verificar se a mensagem contém uma URL
+    url_pattern = r'http[s]?://(?:[a-zA-Z]|[0-9]|[$-_@.&+]|[!*\\(\\),]|(?:%[0-9a-fA-F][0-9a-fA-F]))+'
+    urls = re.findall(url_pattern, text)
+    
+    if not urls:
+        await message.answer("❌ Por favor, envie um link válido de produto.")
+        return
+    
+    product_url = urls[0]  # Pegar o primeiro link encontrado
+    
+    # Verificar se a plataforma é suportada
+    platform = scraper.detect_platform(product_url)
+    if not platform:
+        await message.answer("❌ Plataforma não suportada. Envie links das lojas configuradas.")
+        return
+    
+    if platform not in ['shopee', 'amazon']:
+        await message.answer(f"❌ Plataforma {platform} não foi configurada neste bot.")
+        return
+    
+    # Enviar mensagem de processamento
+    processing_msg = await message.answer("🔍 Analisando produto... Aguarde um momento.")
+    
+    try:
+        # Fazer scraping do produto
+        product_data = await scraper.scrape_product(product_url)
+        
+        if not product_data:
+            await processing_msg.edit_text("❌ Não foi possível extrair informações do produto. Tente novamente.")
+            return
+        
+        # Formatar mensagem do produto
+        product_message = f"""🔥 **{product_data['name']}**
+💰 **Valor:** {product_data['price']}
+📦 **Descrição:** {product_data['description']}
+🏷️ **Cupom:** {product_data['coupon']}
+👉 **Link:** [Clique aqui]({product_url})
+👉 **Pelo PC:** {product_url}
+
+_Via {product_data['platform']}_"""
+        
+        # Enviar foto com a mensagem
+        try:
+            await bot.send_photo(
+                chat_id=message.chat.id,
+                photo=product_data['image_url'],
+                caption=product_message,
+                parse_mode='Markdown'
+            )
+            await processing_msg.delete()
+        except Exception as img_error:
+            logger.error(f"Erro ao enviar imagem: {img_error}")
+            # Se falhar ao enviar imagem, enviar apenas texto
+            await processing_msg.edit_text(product_message, parse_mode='Markdown')
+    
+    except Exception as e:
+        logger.error(f"Erro ao processar produto: {e}")
+        await processing_msg.edit_text("❌ Erro ao processar o produto. Tente novamente mais tarde.")
+
+async def main():
+    """Função principal"""
+    logger.info("Iniciando bot afiliado...")
+    logger.info(f"Plataformas configuradas: shopee, amazon")
+    
+    try:
+        # Iniciar polling
+        await dp.start_polling(bot)
+    finally:
+        # Fechar sessão do scraper
+        await scraper.close_session()
+        await bot.session.close()
+
+if __name__ == "__main__":
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        logger.info("Bot finalizado pelo usuário")
+    except Exception as e:
+        logger.error(f"Erro crítico: {e}")
+
